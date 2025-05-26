@@ -63,42 +63,50 @@ const getInvestmentScore = (parcel) => {
 app.get("/api/parcels/:county", (req, res) => {
   const { county } = req.params;
   const filePath = path.join(__dirname, "data", `${county}_parcels.csv`);
-  const results = [];
 
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: "CSV file not found" });
   }
 
-  fs.createReadStream(filePath)
-    .pipe(csv())
-    .on("data", (row) => {
-      const ownerName = row["Owner Name"] || "Unknown";
+  res.setHeader("Content-Type", "application/x-ndjson");
 
-      const parcel = {
-        parcelId: row["Tax Parcel ID"] || row["Land Parcel Number"] || "Unknown",
-        owner: ownerName,
-        address: row["Mailing Address Line 1"] || "N/A",
-        acreage: parseFloat(row["Deeded Acres"]) || 0,
-        zoning: row["Current Land Use Code"] || "Unknown",
-        gps: {
-          lat: null,
-          lon: null,
-        }, 
-        assessedValue: parseFloat(row["Total Assessed Value"]) || 0,
-        zoningFitScore: getZoningFitScore(row["Current Land Use Code"]),
-        investmentScore: null,
-        ownerType: getOwnerType(ownerName),
-        yearsOwned: getYearsOwned(row["Date Sold"]),
-        contactInfo: null
-      };
+  const stream = fs.createReadStream(filePath)
+    .pipe(csv());
 
-      parcel.investmentScore = getInvestmentScore(parcel);
+  stream.on("data", (row) => {
+    const ownerName = row["Owner Name"] || "Unknown";
 
-      results.push(parcel);
-    })
-    .on("end", () => {
-      res.json(results);
-    });
+    const parcel = {
+      parcelId: row["Tax Parcel ID"] || row["Land Parcel Number"] || "Unknown",
+      owner: ownerName,
+      address: row["Mailing Address Line 1"] || "N/A",
+      acreage: parseFloat(row["Deeded Acres"]) || 0,
+      zoning: row["Current Land Use Code"] || "Unknown",
+      gps: {
+        lat: null,
+        lon: null,
+      },
+      assessedValue: parseFloat(row["Total Assessed Value"]) || 0,
+      zoningFitScore: getZoningFitScore(row["Current Land Use Code"]),
+      investmentScore: null,
+      ownerType: getOwnerType(ownerName),
+      yearsOwned: getYearsOwned(row["Date Sold"]),
+      contactInfo: null
+    };
+
+    parcel.investmentScore = getInvestmentScore(parcel);
+
+    res.write(JSON.stringify(parcel) + "\n");
+  });
+
+  stream.on("end", () => {
+    res.end();
+  });
+
+  stream.on("error", (err) => {
+    console.error("Stream error:", err);
+    res.status(500).end();
+  });
 });
 
 app.listen(PORT, () => {
