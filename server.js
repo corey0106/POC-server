@@ -4,11 +4,15 @@ const fs = require("fs");
 const path = require("path");
 const csv = require("csv-parser");
 
+const authRoutes = require("./routes/auth");
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 5000;
+
+app.use("/api/auth", authRoutes);
 
 const zoningScores = {
   "LI": 5,          
