@@ -5,6 +5,7 @@ const path = require("path");
 const csv = require("csv-parser");
 
 const authRoutes = require("./routes/auth");
+const { getZoningFitScore } = require("./engine/zoning");
 
 const app = express();
 app.use(cors());
@@ -13,34 +14,6 @@ app.use(express.json());
 const PORT = process.env.PORT || 5000;
 
 app.use("/api/auth", authRoutes);
-
-const zoningScores = {
-  "LI": 5,          
-  "HI": 4,          
-  "B2": 3,          
-  "AG": 2,          
-  "R1": 1,          
-  "Residential": 0  
-};
-
-const landUseToZoning = {
-  "RIO": "LI",       
-  "RV": "HI",        
-  "RIL": "B2",       
-  "CI": "AG",        
-  "FUV": "R1",       
-  "EI": "Residential", 
-  "EV": "Residential"  
-};
-
-function getZoningFitScore(landUseCode) {
-  const zoningCategory = landUseToZoning[landUseCode];
-  if (!zoningCategory) {
-    console.warn(`No zoning mapping found for land use code: ${landUseCode}`);
-    return null; 
-  }
-  return zoningScores[zoningCategory];
-}
 
 const getOwnerType = (owner) => {
   if (!owner) return "Unknown";
@@ -57,12 +30,12 @@ const getYearsOwned = (dateSold) => {
 
 const getInvestmentScore = (parcel) => {
   let score = 0;
-  if(parcel.acreage > 1 && parcel.acreage < 5) score += 1;
-  if(parcel.zoningFitScore >= 4) score += 2;
-  if(parcel.ownerType === "Entity") score += 1;
-  if((parcel.yearsOwned ?? 0) > 10) score +=1;
+  if (parcel.acreage > 1 && parcel.acreage < 5) score += 1;
+  if (parcel.zoningFitScore >= 4) score += 2;
+  if (parcel.ownerType === "Entity") score += 1;
+  if ((parcel.yearsOwned ?? 0) > 10) score += 1;
   return score;
-}
+};
 
 app.get("/api/parcels/:county", (req, res) => {
   const { county } = req.params;
@@ -74,27 +47,38 @@ app.get("/api/parcels/:county", (req, res) => {
 
   res.setHeader("Content-Type", "application/x-ndjson");
 
-  const stream = fs.createReadStream(filePath)
-    .pipe(csv());
+  const stream = fs.createReadStream(filePath).pipe(csv());
 
   stream.on("data", (row) => {
-    const ownerName = row["Owner Name"] || "Unknown";
+    const ownerName = row["owner"] || "Unknown";
+
+    const mailingAddress = [
+      row["mailadd"],
+      row["mail_addpref"],
+      row["mail_addstr"],
+      row["mail_addsttyp"],
+      row["mail_addstsuf"],
+      row["mail_unit"] ? `Unit ${row["mail_unit"]}` : null,
+      row["mail_city"],
+      row["mail_state2"],
+      row["mail_zip"]
+    ].filter(Boolean).join(" ");
 
     const parcel = {
-      parcelId: row["Tax Parcel ID"] || row["Land Parcel Number"] || "Unknown",
+      parcelId: row["parcelnumb"] || "Unknown",
       owner: ownerName,
-      address: row["Mailing Address Line 1"] || "N/A",
-      acreage: parseFloat(row["Deeded Acres"]) || 0,
-      zoning: row["Current Land Use Code"] || "Unknown",
+      address: mailingAddress || "N/A",
+      acreage: parseFloat(row["ll_gisacre"]) || 0,
+      zoning: row["zoning"] || "Unknown",
+      zoning_desc: row["zoning_description"] || "Unknown",
+      zoningFitScore: getZoningFitScore(row["zoning"]),
       gps: {
-        lat: null,
-        lon: null,
+        lat: row["lat"] || "Unknown",
+        lon: row["lon"] || "Unknown",
       },
-      assessedValue: parseFloat(row["Total Assessed Value"]) || 0,
-      zoningFitScore: getZoningFitScore(row["Current Land Use Code"]),
       investmentScore: null,
       ownerType: getOwnerType(ownerName),
-      yearsOwned: getYearsOwned(row["Date Sold"]),
+      yearsOwned: getYearsOwned(row["saledate"]),
       contactInfo: null
     };
 
@@ -114,5 +98,5 @@ app.get("/api/parcels/:county", (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ Server running on ${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
