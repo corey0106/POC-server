@@ -206,10 +206,39 @@ app.get("/api/debug-highway/:county", (req, res) => {
     fileSize: null,
     canRead: false,
     engineLoaded: false,
-    error: null
+    error: null,
+    // Additional debugging info
+    currentDir: __dirname,
+    dataDirExists: fs.existsSync(path.join(__dirname, "data")),
+    dataDirContents: [],
+    alternativePaths: []
   };
   
   try {
+    // Check current directory and data directory
+    console.log(`🔍 Current directory: ${__dirname}`);
+    console.log(`🔍 Looking for file: ${filePath}`);
+    
+    // List contents of data directory
+    if (diagnostic.dataDirExists) {
+      try {
+        diagnostic.dataDirContents = fs.readdirSync(path.join(__dirname, "data"));
+        console.log(`📁 Data directory contents:`, diagnostic.dataDirContents);
+      } catch (dirError) {
+        console.error(`❌ Cannot read data directory:`, dirError.message);
+      }
+    }
+    
+    // Check for alternative file names (case variations)
+    if (diagnostic.dataDirExists) {
+      const dataDir = path.join(__dirname, "data");
+      const files = fs.readdirSync(dataDir);
+      diagnostic.alternativePaths = files.filter(file => 
+        file.toLowerCase().includes('road') && file.toLowerCase().includes('richland')
+      );
+      console.log(`🔍 Found potential highway files:`, diagnostic.alternativePaths);
+    }
+    
     if (diagnostic.fileExists) {
       const stats = fs.statSync(filePath);
       diagnostic.fileSize = `${(stats.size / 1024 / 1024).toFixed(2)} MB`;
@@ -221,6 +250,14 @@ app.get("/api/debug-highway/:county", (req, res) => {
         diagnostic.sample = sample.substring(0, 200) + "...";
       } catch (readError) {
         diagnostic.error = `Cannot read file: ${readError.message}`;
+      }
+    } else {
+      // File doesn't exist, let's check what's in the data directory
+      console.log(`❌ File not found: ${filePath}`);
+      if (diagnostic.dataDirExists) {
+        console.log(`📁 Available files in data directory:`, diagnostic.dataDirContents);
+      } else {
+        console.log(`❌ Data directory doesn't exist: ${path.join(__dirname, "data")}`);
       }
     }
     
@@ -242,6 +279,7 @@ app.get("/api/debug-highway/:county", (req, res) => {
     diagnostic.error = error.message;
   }
   
+  console.log(`📊 Diagnostic result:`, diagnostic);
   res.json(diagnostic);
 });
 

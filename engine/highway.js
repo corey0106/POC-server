@@ -60,20 +60,76 @@ let highwayCache = null;
 function loadHighwayData(county) {
   if (highwayData) return highwayData;
   
-  const filePath = path.join(__dirname, '..', 'data', `roaddata_${county}.geojson`);
+  // Try multiple possible file paths
+  const possiblePaths = [
+    path.join(__dirname, '..', 'data', `roaddata_${county}.geojson`),
+    path.join(__dirname, '..', 'data', `roaddata_${county.toLowerCase()}.geojson`),
+    path.join(__dirname, '..', 'data', `roaddata_${county.toUpperCase()}.geojson`),
+    path.join(__dirname, '..', 'data', `roaddata-${county}.geojson`),
+    path.join(__dirname, '..', 'data', `roaddata-${county.toLowerCase()}.geojson`),
+    path.join(__dirname, '..', 'data', `roaddata-${county.toUpperCase()}.geojson`),
+    path.join(__dirname, '..', 'data', `road_data_${county}.geojson`),
+    path.join(__dirname, '..', 'data', `road_data_${county.toLowerCase()}.geojson`),
+    path.join(__dirname, '..', 'data', `road_data_${county.toUpperCase()}.geojson`)
+  ];
   
-  if (!fs.existsSync(filePath)) {
-    console.warn(`Highway data file not found: ${filePath}`);
-    return null;
+  let filePath = null;
+  let foundPath = null;
+  
+  console.log(`🔍 Looking for highway data file for ${county} county...`);
+  
+  for (const testPath of possiblePaths) {
+    console.log(`  Checking: ${testPath}`);
+    if (fs.existsSync(testPath)) {
+      filePath = testPath;
+      foundPath = testPath;
+      console.log(`✅ Found file at: ${foundPath}`);
+      break;
+    }
+  }
+  
+  if (!filePath) {
+    // If no file found, let's check what's actually in the data directory
+    const dataDir = path.join(__dirname, '..', 'data');
+    if (fs.existsSync(dataDir)) {
+      try {
+        const files = fs.readdirSync(dataDir);
+        console.log(`📁 Available files in data directory:`, files);
+        
+        // Look for any file that might be highway data
+        const potentialFiles = files.filter(file => 
+          file.toLowerCase().includes('road') && 
+          file.toLowerCase().includes('richland') &&
+          file.toLowerCase().endsWith('.geojson')
+        );
+        
+        if (potentialFiles.length > 0) {
+          console.log(`🔍 Found potential highway files:`, potentialFiles);
+          filePath = path.join(dataDir, potentialFiles[0]);
+          foundPath = filePath;
+          console.log(`✅ Using alternative file: ${foundPath}`);
+        }
+      } catch (error) {
+        console.error(`❌ Cannot read data directory:`, error.message);
+      }
+    }
+    
+    if (!filePath) {
+      console.error(`❌ No highway data file found for ${county} county`);
+      console.error(`❌ Tried paths:`, possiblePaths);
+      return null;
+    }
   }
   
   try {
-    const rawData = fs.readFileSync(filePath, 'utf8');
+    console.log(`📖 Reading highway data file: ${foundPath}`);
+    const rawData = fs.readFileSync(foundPath, 'utf8');
+    console.log(`📊 Parsing JSON data...`);
     highwayData = JSON.parse(rawData);
-    console.log(`✅ Loaded highway data for ${county} county`);
+    console.log(`✅ Loaded highway data for ${county} county with ${highwayData.features?.length || 0} features`);
     return highwayData;
   } catch (error) {
-    console.error('Error loading highway data:', error);
+    console.error('❌ Error loading highway data:', error);
     return null;
   }
 }
