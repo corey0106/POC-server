@@ -6,6 +6,7 @@ const csv = require("csv-parser");
 
 const authRoutes = require("./routes/auth");
 const { getZoningFitScore } = require("./engine/zoning");
+const { getHighwayDistance, getHighwayDistanceScore } = require("./engine/highway");
 
 const app = express();
 app.use(cors());
@@ -34,6 +35,7 @@ const getInvestmentScore = (parcel) => {
   if (parcel.zoningFitScore >= 4) score += 2;
   if (parcel.ownerType === "Entity") score += 1;
   if ((parcel.yearsOwned ?? 0) > 10) score += 1;
+  if (parcel.highwayDistanceScore >= 7) score += 1;
   return score;
 };
 
@@ -79,7 +81,9 @@ app.get("/api/parcels/:county", (req, res) => {
       investmentScore: null,
       ownerType: getOwnerType(ownerName),
       yearsOwned: getYearsOwned(row["saledate"]),
-      contactInfo: null
+      contactInfo: null,
+      highwayDistance: null,
+      highwayDistanceScore: null
     };
 
     parcel.investmentScore = getInvestmentScore(parcel);
@@ -95,6 +99,38 @@ app.get("/api/parcels/:county", (req, res) => {
     console.error("Stream error:", err);
     res.status(500).end();
   });
+});
+
+app.post("/api/parcels/:county/highway-distances", (req, res) => {
+  const { county } = req.params;
+  const { parcels } = req.body;
+
+  if (!parcels || !Array.isArray(parcels)) {
+    return res.status(400).json({ error: "Parcels array is required" });
+  }
+
+  console.log(`🛣️ Calculating highway distances for ${parcels.length} parcels...`);
+
+  const parcelsWithHighwayData = parcels.map(parcel => {
+    if (parcel.gps && parcel.gps.lat !== "Unknown" && parcel.gps.lon !== "Unknown") {
+      const highwayInfo = getHighwayDistance(parcel.gps.lat, parcel.gps.lon, county);
+      const highwayDistanceScore = highwayInfo ? getHighwayDistanceScore(highwayInfo.distanceMiles) : null;
+
+      return {
+        ...parcel,
+        highwayDistance: highwayInfo ? {
+          distanceMiles: highwayInfo.distanceMiles,
+          distanceKm: highwayInfo.distanceKm,
+          roadName: highwayInfo.roadName,
+          roadType: highwayInfo.roadType
+        } : null,
+        highwayDistanceScore: highwayDistanceScore
+      };
+    }
+    return parcel;
+  });
+
+  res.json({ parcels: parcelsWithHighwayData });
 });
 
 app.listen(PORT, () => {
