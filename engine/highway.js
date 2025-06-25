@@ -140,40 +140,45 @@ function getHighwayDistance(lat, lon, county = 'Richland') {
     return null;
   }
   
-  const highways = initializeHighwayCache(county);
-  if (!highways || highways.length === 0) {
-    console.warn('No highway data available for distance calculation');
+  try {
+    const highways = initializeHighwayCache(county);
+    if (!highways || highways.length === 0) {
+      console.warn('No highway data available for distance calculation');
+      return null;
+    }
+    
+    let minDistance = Infinity;
+    let nearestHighway = null;
+    
+    // Create a point from the parcel coordinates
+    const parcelPoint = turf.point([parseFloat(lon), parseFloat(lat)]);
+    
+    for (const highway of highways) {
+      try {
+        // Calculate distance from point to line using turf.js
+        const distance = turf.pointToLineDistance(parcelPoint, highway.turfLine, { units: 'miles' });
+        
+        if (distance < minDistance) {
+          minDistance = distance;
+          nearestHighway = {
+            distance: distance,
+            distanceMiles: distance,
+            distanceKm: distance * 1.60934, // Convert miles to kilometers
+            roadName: highway.properties.name || highway.properties.alt_name || highway.properties.ref || 'Unknown',
+            roadType: highway.properties.highway || 'Unknown'
+          };
+        }
+      } catch (error) {
+        console.warn('Error calculating distance for highway segment:', error.message);
+        continue;
+      }
+    }
+    
+    return nearestHighway;
+  } catch (error) {
+    console.error('Error in getHighwayDistance:', error.message);
     return null;
   }
-  
-  let minDistance = Infinity;
-  let nearestHighway = null;
-  
-  // Create a point from the parcel coordinates
-  const parcelPoint = turf.point([parseFloat(lon), parseFloat(lat)]);
-  
-  for (const highway of highways) {
-    try {
-      // Calculate distance from point to line using turf.js
-      const distance = turf.pointToLineDistance(parcelPoint, highway.turfLine, { units: 'miles' });
-      
-      if (distance < minDistance) {
-        minDistance = distance;
-        nearestHighway = {
-          distance: distance,
-          distanceMiles: distance,
-          distanceKm: distance * 1.60934, // Convert miles to kilometers
-          roadName: highway.properties.name || highway.properties.alt_name || highway.properties.ref || 'Unknown',
-          roadType: highway.properties.highway || 'Unknown'
-        };
-      }
-    } catch (error) {
-      console.warn('Error calculating distance for highway segment:', error);
-      continue;
-    }
-  }
-  
-  return nearestHighway;
 }
 
 // Get highway distance score (0-10 scale)
