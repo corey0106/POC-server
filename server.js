@@ -41,9 +41,25 @@ const getInvestmentScore = (parcel) => {
 
 app.get("/api/parcels/:county", (req, res) => {
   const { county } = req.params;
-  const filePath = path.join(__dirname, "data", `${county}_parcels.csv`);
+  
+  // Try multiple possible CSV file paths
+  const possibleCsvPaths = [
+    path.join(__dirname, "data", `${county}_parcels.csv`),
+    path.join(__dirname, "data", `${county.toLowerCase()}_parcels.csv`),
+    path.join(__dirname, "data", `${county.toUpperCase()}_parcels.csv`),
+    path.join(process.cwd(), "data", `${county}_parcels.csv`),
+    path.join(process.cwd(), "server", "data", `${county}_parcels.csv`)
+  ];
+  
+  let filePath = null;
+  for (const testPath of possibleCsvPaths) {
+    if (fs.existsSync(testPath)) {
+      filePath = testPath;
+      break;
+    }
+  }
 
-  if (!fs.existsSync(filePath)) {
+  if (!filePath) {
     return res.status(404).json({ error: "CSV file not found" });
   }
 
@@ -109,31 +125,7 @@ app.post("/api/parcels/:county/highway-distances", (req, res) => {
     return res.status(400).json({ error: "Parcels array is required" });
   }
 
-  console.log(`🛣️ Calculating highway distances for ${parcels.length} parcels...`);
-
   try {
-    // First, check if highway data is available
-    const filePath = path.join(__dirname, "data", `roaddata_${county}.geojson`);
-    const fileExists = fs.existsSync(filePath);
-    
-    if (!fileExists) {
-      console.warn(`⚠️ Highway data file not found: ${filePath}`);
-      console.log(`📋 Returning parcels without highway data due to missing file`);
-      
-      // Return parcels with null highway data and a warning
-      const parcelsWithoutHighway = parcels.map(parcel => ({
-        ...parcel,
-        highwayDistance: null,
-        highwayDistanceScore: null,
-        _highwayWarning: "Highway data file not available on server"
-      }));
-      
-      return res.json({ 
-        parcels: parcelsWithoutHighway,
-        warning: "Highway data file not found on server. Distances set to null."
-      });
-    }
-
     const parcelsWithHighwayData = parcels.map(parcel => {
       try {
         if (parcel.gps && parcel.gps.lat !== "Unknown" && parcel.gps.lon !== "Unknown") {
@@ -153,134 +145,24 @@ app.post("/api/parcels/:county/highway-distances", (req, res) => {
         }
         return parcel;
       } catch (error) {
-        console.error(`Error processing parcel ${parcel.parcelId}:`, error.message);
         return {
           ...parcel,
           highwayDistance: null,
-          highwayDistanceScore: null,
-          _highwayError: error.message
+          highwayDistanceScore: null
         };
       }
     });
 
-    // Count how many parcels got highway data
-    const parcelsWithData = parcelsWithHighwayData.filter(p => p.highwayDistance !== null);
-    console.log(`✅ Successfully calculated highway distances for ${parcelsWithData.length}/${parcels.length} parcels`);
-
-    res.json({ 
-      parcels: parcelsWithHighwayData,
-      summary: {
-        total: parcels.length,
-        withHighwayData: parcelsWithData.length,
-        withoutHighwayData: parcels.length - parcelsWithData.length
-      }
-    });
+    res.json({ parcels: parcelsWithHighwayData });
   } catch (error) {
     console.error('Error in highway distance calculation:', error);
-    
-    // Return parcels without highway data instead of failing completely
-    const fallbackParcels = parcels.map(parcel => ({
-      ...parcel,
-      highwayDistance: null,
-      highwayDistanceScore: null,
-      _highwayError: "Engine error occurred"
-    }));
-    
-    res.json({ 
-      parcels: fallbackParcels,
-      error: "Highway calculation failed, returning parcels without distance data",
-      details: error.message
-    });
+    res.status(500).json({ error: "Internal server error during highway distance calculation" });
   }
 });
 
-// Diagnostic endpoint to check highway data availability
-app.get("/api/debug-highway/:county", (req, res) => {
-  const { county } = req.params;
-  const filePath = path.join(__dirname, "data", `roaddata_${county}.geojson`);
-  
-  const diagnostic = {
-    county: county,
-    filePath: filePath,
-    fileExists: fs.existsSync(filePath),
-    fileSize: null,
-    canRead: false,
-    engineLoaded: false,
-    error: null,
-    // Additional debugging info
-    currentDir: __dirname,
-    dataDirExists: fs.existsSync(path.join(__dirname, "data")),
-    dataDirContents: [],
-    alternativePaths: []
-  };
-  
-  try {
-    // Check current directory and data directory
-    console.log(`🔍 Current directory: ${__dirname}`);
-    console.log(`🔍 Looking for file: ${filePath}`);
-    
-    // List contents of data directory
-    if (diagnostic.dataDirExists) {
-      try {
-        diagnostic.dataDirContents = fs.readdirSync(path.join(__dirname, "data"));
-        console.log(`📁 Data directory contents:`, diagnostic.dataDirContents);
-      } catch (dirError) {
-        console.error(`❌ Cannot read data directory:`, dirError.message);
-      }
-    }
-    
-    // Check for alternative file names (case variations)
-    if (diagnostic.dataDirExists) {
-      const dataDir = path.join(__dirname, "data");
-      const files = fs.readdirSync(dataDir);
-      diagnostic.alternativePaths = files.filter(file => 
-        file.toLowerCase().includes('road') && file.toLowerCase().includes('richland')
-      );
-      console.log(`🔍 Found potential highway files:`, diagnostic.alternativePaths);
-    }
-    
-    if (diagnostic.fileExists) {
-      const stats = fs.statSync(filePath);
-      diagnostic.fileSize = `${(stats.size / 1024 / 1024).toFixed(2)} MB`;
-      
-      // Test if we can read the file
-      try {
-        const sample = fs.readFileSync(filePath, 'utf8').substring(0, 1000);
-        diagnostic.canRead = true;
-        diagnostic.sample = sample.substring(0, 200) + "...";
-      } catch (readError) {
-        diagnostic.error = `Cannot read file: ${readError.message}`;
-      }
-    } else {
-      // File doesn't exist, let's check what's in the data directory
-      console.log(`❌ File not found: ${filePath}`);
-      if (diagnostic.dataDirExists) {
-        console.log(`📁 Available files in data directory:`, diagnostic.dataDirContents);
-      } else {
-        console.log(`❌ Data directory doesn't exist: ${path.join(__dirname, "data")}`);
-      }
-    }
-    
-    // Test if highway engine can be loaded
-    try {
-      const { getHighwayDistance } = require("./engine/highway");
-      diagnostic.engineLoaded = true;
-      
-      // Test a simple distance calculation
-      if (diagnostic.canRead) {
-        const testResult = getHighwayDistance(34.0522, -81.0348, county);
-        diagnostic.testResult = testResult;
-      }
-    } catch (engineError) {
-      diagnostic.error = `Engine error: ${engineError.message}`;
-    }
-    
-  } catch (error) {
-    diagnostic.error = error.message;
-  }
-  
-  console.log(`📊 Diagnostic result:`, diagnostic);
-  res.json(diagnostic);
+// Health check endpoint for deployment monitoring
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
 app.listen(PORT, () => {

@@ -60,76 +60,92 @@ let highwayCache = null;
 function loadHighwayData(county) {
   if (highwayData) return highwayData;
   
-  // Try multiple possible file paths
+  // Try multiple possible file paths for different deployment scenarios
   const possiblePaths = [
+    // Standard paths
     path.join(__dirname, '..', 'data', `roaddata_${county}.geojson`),
     path.join(__dirname, '..', 'data', `roaddata_${county.toLowerCase()}.geojson`),
     path.join(__dirname, '..', 'data', `roaddata_${county.toUpperCase()}.geojson`),
+    
+    // Alternative naming conventions
     path.join(__dirname, '..', 'data', `roaddata-${county}.geojson`),
     path.join(__dirname, '..', 'data', `roaddata-${county.toLowerCase()}.geojson`),
     path.join(__dirname, '..', 'data', `roaddata-${county.toUpperCase()}.geojson`),
     path.join(__dirname, '..', 'data', `road_data_${county}.geojson`),
     path.join(__dirname, '..', 'data', `road_data_${county.toLowerCase()}.geojson`),
-    path.join(__dirname, '..', 'data', `road_data_${county.toUpperCase()}.geojson`)
+    path.join(__dirname, '..', 'data', `road_data_${county.toUpperCase()}.geojson`),
+    
+    // Deployment-friendly paths (relative to current working directory)
+    path.join(process.cwd(), 'data', `roaddata_${county}.geojson`),
+    path.join(process.cwd(), 'data', `roaddata_${county.toLowerCase()}.geojson`),
+    path.join(process.cwd(), 'server', 'data', `roaddata_${county}.geojson`),
+    path.join(process.cwd(), 'server', 'data', `roaddata_${county.toLowerCase()}.geojson`),
+    
+    // Absolute paths for some deployment scenarios
+    `/app/data/roaddata_${county}.geojson`,
+    `/app/data/roaddata_${county.toLowerCase()}.geojson`,
+    `/usr/src/app/data/roaddata_${county}.geojson`,
+    `/usr/src/app/data/roaddata_${county.toLowerCase()}.geojson`
   ];
   
   let filePath = null;
-  let foundPath = null;
   
-  console.log(`🔍 Looking for highway data file for ${county} county...`);
-  
+  // Try each possible path
   for (const testPath of possiblePaths) {
-    console.log(`  Checking: ${testPath}`);
-    if (fs.existsSync(testPath)) {
-      filePath = testPath;
-      foundPath = testPath;
-      console.log(`✅ Found file at: ${foundPath}`);
-      break;
+    try {
+      if (fs.existsSync(testPath)) {
+        filePath = testPath;
+        break;
+      }
+    } catch (error) {
+      // Continue to next path if this one fails
+      continue;
+    }
+  }
+  
+  // If no file found, try to find any highway file in data directories
+  if (!filePath) {
+    const dataDirs = [
+      path.join(__dirname, '..', 'data'),
+      path.join(process.cwd(), 'data'),
+      path.join(process.cwd(), 'server', 'data'),
+      '/app/data',
+      '/usr/src/app/data'
+    ];
+    
+    for (const dataDir of dataDirs) {
+      try {
+        if (fs.existsSync(dataDir)) {
+          const files = fs.readdirSync(dataDir);
+          
+          // Look for any file that might be highway data
+          const potentialFiles = files.filter(file => 
+            file.toLowerCase().includes('road') && 
+            file.toLowerCase().includes('richland') &&
+            file.toLowerCase().endsWith('.geojson')
+          );
+          
+          if (potentialFiles.length > 0) {
+            filePath = path.join(dataDir, potentialFiles[0]);
+            break;
+          }
+        }
+      } catch (error) {
+        // Continue to next directory
+        continue;
+      }
     }
   }
   
   if (!filePath) {
-    // If no file found, let's check what's actually in the data directory
-    const dataDir = path.join(__dirname, '..', 'data');
-    if (fs.existsSync(dataDir)) {
-      try {
-        const files = fs.readdirSync(dataDir);
-        console.log(`📁 Available files in data directory:`, files);
-        
-        // Look for any file that might be highway data
-        const potentialFiles = files.filter(file => 
-          file.toLowerCase().includes('road') && 
-          file.toLowerCase().includes('richland') &&
-          file.toLowerCase().endsWith('.geojson')
-        );
-        
-        if (potentialFiles.length > 0) {
-          console.log(`🔍 Found potential highway files:`, potentialFiles);
-          filePath = path.join(dataDir, potentialFiles[0]);
-          foundPath = filePath;
-          console.log(`✅ Using alternative file: ${foundPath}`);
-        }
-      } catch (error) {
-        console.error(`❌ Cannot read data directory:`, error.message);
-      }
-    }
-    
-    if (!filePath) {
-      console.error(`❌ No highway data file found for ${county} county`);
-      console.error(`❌ Tried paths:`, possiblePaths);
-      return null;
-    }
+    return null;
   }
   
   try {
-    console.log(`📖 Reading highway data file: ${foundPath}`);
-    const rawData = fs.readFileSync(foundPath, 'utf8');
-    console.log(`📊 Parsing JSON data...`);
+    const rawData = fs.readFileSync(filePath, 'utf8');
     highwayData = JSON.parse(rawData);
-    console.log(`✅ Loaded highway data for ${county} county with ${highwayData.features?.length || 0} features`);
     return highwayData;
   } catch (error) {
-    console.error('❌ Error loading highway data:', error);
     return null;
   }
 }
@@ -140,54 +156,62 @@ function initializeHighwayCache(county) {
   
   const data = loadHighwayData(county);
   if (!data || !data.features) {
-    console.warn('No highway features found in data');
     return null;
   }
   
-  highwayCache = data.features
-    .filter(feature => {
-      // Filter for highway/road features using OpenStreetMap properties
-      const properties = feature.properties || {};
-      const highwayType = properties.highway || '';
-      const ref = properties.ref || '';
-      const name = properties.name || properties.alt_name || '';
-      
-      // Include major road types
-      const majorRoadTypes = [
-        'motorway', 'trunk', 'primary', 'secondary', 'tertiary',
-        'motorway_link', 'trunk_link', 'primary_link', 'secondary_link'
-      ];
-      
-      // Include highways with specific references
-      const highwayRefs = ['I-', 'US-', 'SC-', 'I ', 'US ', 'SC '];
-      
-      return majorRoadTypes.includes(highwayType) || 
-             highwayRefs.some(refPrefix => ref.includes(refPrefix)) ||
-             name.toLowerCase().includes('highway') ||
-             name.toLowerCase().includes('interstate');
-    })
-    .map(feature => {
-      const geometry = feature.geometry;
-      if (geometry.type === 'LineString') {
-        return {
-          coordinates: geometry.coordinates,
-          properties: feature.properties,
-          turfLine: turf.lineString(geometry.coordinates)
-        };
-      } else if (geometry.type === 'MultiLineString') {
-        return geometry.coordinates.map(coords => ({
-          coordinates: coords,
-          properties: feature.properties,
-          turfLine: turf.lineString(coords)
-        }));
-      }
-      return null;
-    })
-    .filter(Boolean)
-    .flat();
-  
-  console.log(`✅ Cached ${highwayCache.length} highway segments for ${county} county`);
-  return highwayCache;
+  try {
+    highwayCache = data.features
+      .filter(feature => {
+        // Filter for highway/road features using OpenStreetMap properties
+        const properties = feature.properties || {};
+        const highwayType = properties.highway || '';
+        const ref = properties.ref || '';
+        const name = properties.name || properties.alt_name || '';
+        
+        // Include major road types
+        const majorRoadTypes = [
+          'motorway', 'trunk', 'primary', 'secondary', 'tertiary',
+          'motorway_link', 'trunk_link', 'primary_link', 'secondary_link'
+        ];
+        
+        // Include highways with specific references
+        const highwayRefs = ['I-', 'US-', 'SC-', 'I ', 'US ', 'SC '];
+        
+        const isHighway = majorRoadTypes.includes(highwayType) || 
+               highwayRefs.some(refPrefix => ref.includes(refPrefix)) ||
+               name.toLowerCase().includes('highway') ||
+               name.toLowerCase().includes('interstate');
+        
+        return isHighway;
+      })
+      .map(feature => {
+        try {
+          const geometry = feature.geometry;
+          if (geometry.type === 'LineString') {
+            return {
+              coordinates: geometry.coordinates,
+              properties: feature.properties,
+              turfLine: turf.lineString(geometry.coordinates)
+            };
+          } else if (geometry.type === 'MultiLineString') {
+            return geometry.coordinates.map(coords => ({
+              coordinates: coords,
+              properties: feature.properties,
+              turfLine: turf.lineString(coords)
+            }));
+          }
+          return null;
+        } catch (error) {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .flat();
+    
+    return highwayCache;
+  } catch (error) {
+    return null;
+  }
 }
 
 // Calculate distance to nearest highway using turf.js
@@ -199,7 +223,6 @@ function getHighwayDistance(lat, lon, county = 'Richland') {
   try {
     const highways = initializeHighwayCache(county);
     if (!highways || highways.length === 0) {
-      console.warn('No highway data available for distance calculation');
       return null;
     }
     
@@ -225,14 +248,12 @@ function getHighwayDistance(lat, lon, county = 'Richland') {
           };
         }
       } catch (error) {
-        console.warn('Error calculating distance for highway segment:', error.message);
         continue;
       }
     }
     
     return nearestHighway;
   } catch (error) {
-    console.error('Error in getHighwayDistance:', error.message);
     return null;
   }
 }

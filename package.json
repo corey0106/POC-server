@@ -12,13 +12,12 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@turf/turf": "^6.5.0",
     "axios": "^1.9.0",
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
-    "node-fetch": "^3.3.2"
+    "@turf/turf": "^6.5.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
